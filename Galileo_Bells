@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Galileo's Musical Incline - Fixed Audio</title>
+    <style>
+        body { font-family: 'Segoe UI', sans-serif; display: flex; flex-direction: column; align-items: center; background: #f4f4f9; padding: 20px; }
+        canvas { background: #fff; border: 3px solid #333; border-radius: 8px; box-shadow: 0 10px 20px rgba(0,0,0,0.2); cursor: pointer; }
+        .controls { margin: 20px; display: flex; gap: 20px; align-items: center; }
+        button { padding: 15px 30px; font-size: 18px; font-weight: bold; color: white; background: #27ae60; border: none; border-radius: 5px; cursor: pointer; }
+        button:hover { background: #2ecc71; }
+        #status { font-weight: bold; color: #7f8c8d; }
+        .info { max-width: 800px; text-align: center; margin-bottom: 20px; }
+    </style>
+</head>
+<body>
+    <h2>Galileo's 10-Bell Harmonic Track</h2>
+    <div class="info">
+        <p>Bells are spaced at <b>d = t²</b>. If acceleration is constant, the <b>rhythm</b> will be steady.</p>
+        <div id="status">Audio Status: Waiting for click...</div>
+    </div>
+    
+    <canvas id="simCanvas" width="1000" height="500"></canvas>
+    
+    <div class="controls">
+        <button id="startBtn">Release Ball & Enable Sound</button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const startBtn = document.getElementById('startBtn');
+        
+        // Physics logic
+        const accel = 0.003; 
+        const scale = 8.5;   
+        const hoops = [1, 4, 9, 16, 25, 36, 49, 64, 81, 100]; 
+        
+        let startTime = null;
+        let ballPos = 0;
+        let reachedHoops = [];
+        let animationId = null;
+        let audioCtx = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            statusDiv.innerText = "Audio Status: ACTIVE 🔊";
+            statusDiv.style.color = "#27ae60";
+        }
+
+        function playBell(index) {
+            if (!audioCtx) return;
+            
+            const baseFreq = 880 - (index * 40); 
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'triangle'; 
+            osc.frequency.setValueAtTime(baseFreq, audioCtx.currentTime);
+            
+            // Louder Volume Envelope
+            gain.gain.setValueAtTime(0, audioCtx.currentTime);
+            gain.gain.linearRampToValueAtTime(0.8, audioCtx.currentTime + 0.01); // Sharp attack
+            gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.8); // Long decay
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.8);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            const startX = 50, startY = 50;
+            const endX = 950, endY = 450;
+            const angle = Math.atan2(endY - startY, endX - startX);
+
+            // Track
+            ctx.beginPath();
+            ctx.moveTo(startX, startY);
+            ctx.lineTo(endX, endY);
+            ctx.strokeStyle = '#5d4037';
+            ctx.lineWidth = 8;
+            ctx.stroke();
+
+            // Bells
+            hoops.forEach((h, index) => {
+                const x = startX + (h * scale) * Math.cos(angle);
+                const y = startY + (h * scale) * Math.sin(angle);
+                ctx.beginPath();
+                ctx.arc(x, y, 12, 0, Math.PI * 2);
+                ctx.fillStyle = reachedHoops.includes(h) ? '#e74c3c' : '#bdc3c7';
+                ctx.fill();
+                ctx.stroke();
+                ctx.fillStyle = "#333";
+                ctx.fillText(`t=${index+1}`, x - 10, y - 20);
+            });
+
+            // Ball
+            const bx = startX + ballPos * Math.cos(angle);
+            const by = startY + ballPos * Math.sin(angle);
+            ctx.beginPath();
+            ctx.arc(bx, by, 10, 0, Math.PI * 2);
+            ctx.fillStyle = '#2c3e50';
+            ctx.fill();
+        }
+
+        function update(timestamp) {
+            if (!startTime) startTime = timestamp;
+            const t = timestamp - startTime;
+            ballPos = 0.5 * accel * Math.pow(t, 2);
+
+            hoops.forEach((h, index) => {
+                if (ballPos >= h * scale && !reachedHoops.includes(h)) {
+                    reachedHoops.push(h);
+                    playBell(index);
+                }
+            });
+
+            draw();
+            if (ballPos < 950) animationId = requestAnimationFrame(update);
+        }
+
+        startBtn.addEventListener('click', () => {
+            initAudio(); // Essential for browser permission
+            cancelAnimationFrame(animationId);
+            startTime = null;
+            ballPos = 0;
+            reachedHoops = [];
+            requestAnimationFrame(update);
+        });
+
+        draw(); // Initial draw
+    </script>
+</body>
+</html>
