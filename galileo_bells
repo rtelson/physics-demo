@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Galileo's Apparatus - Multi-Speed Calibration</title>
+    <style>
+        body { font-family: 'Segoe UI', serif; display: flex; flex-direction: column; align-items: center; background: #e0d7c6; padding: 30px; color: #3e2723; }
+        canvas { background: #fffcf5; border: 6px solid #5d4037; border-radius: 4px; box-shadow: 0 20px 40px rgba(0,0,0,0.3); }
+        .controls { margin-top: 30px; display: flex; flex-direction: column; align-items: center; width: 100%; max-width: 1200px; }
+        .button-group { display: flex; gap: 20px; margin-bottom: 25px; }
+        button { padding: 25px 50px; font-size: 24px; font-weight: bold; color: white; background: #5d4037; border: none; border-radius: 6px; cursor: pointer; box-shadow: 0 5px 0 #3e2723; transition: all 0.1s; }
+        button:hover { background: #795548; }
+        button:active { transform: translateY(3px); box-shadow: 0 2px 0 #3e2723; }
+        #speedBtn { background: #34495e; box-shadow: 0 5px 0 #2c3e50; min-width: 350px; }
+        
+        .parameters-plaque { 
+            background: #fdfbf7; border: 3px solid #5d4037; padding: 20px 40px; border-radius: 8px; box-shadow: inset 0 0 15px rgba(0,0,0,0.1);
+            text-align: center; color: #5d4037; width: 90%;
+        }
+        .parameters-plaque b { font-size: 22px; color: #3e2723; display: block; margin-bottom: 10px; }
+        .data-table {
+            display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-top: 15px;
+            font-family: 'Times New Roman', serif; font-size: 18px; border-top: 1px solid #d7ccc8; padding-top: 15px;
+        }
+        .column-header { font-weight: bold; text-decoration: underline; color: #3e2723; }
+        .math { font-family: 'Times New Roman', serif; font-size: 1.4em; font-weight: bold; display: block; }
+    </style>
+</head>
+<body>
+
+    <div id="status">Speed Cycle: 1.5s | 2.0s | 2.5s</div>
+    <canvas id="simCanvas" width="1200" height="600"></canvas>
+    
+    <div class="controls">
+        <div class="button-group">
+            <button id="startBtn">BEGIN EXPERIMENT</button>
+            <button id="speedBtn">SPEED: STANDARD (1.5s)</button>
+        </div>
+        <div class="parameters-plaque">
+            <b>PHYSICAL PARAMETERS (SI UNITS)</b>
+            <span id="formula" class="math">Total Duration: 1.50 s | x = ½at²</span>
+            
+            <div class="data-table">
+                <div><div class="column-header">Interval (n)</div>1<br>2<br>3<br>4<br>5<br>6<br>7<br>8<br>9<br>10<br>11</div>
+                <div><div class="column-header">Ratio (n²)</div>1<br>4<br>9<br>16<br>25<br>36<br>49<br>64<br>81<br>100<br>121</div>
+                <div><div class="column-header">Distance (m)</div>0.250<br>1.000<br>2.250<br>4.000<br>6.250<br>9.000<br>12.250<br>16.000<br>20.250<br>25.000<br>30.250</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+        const startBtn = document.getElementById('startBtn');
+        const speedBtn = document.getElementById('speedBtn');
+        const statusDiv = document.getElementById('status');
+        const formulaDiv = document.getElementById('formula');
+
+        const scale = 8.5;   
+        const hoops = [1, 4, 9, 16, 25, 36, 49, 64, 81, 100, 121]; 
+        const maxDist = 121 * scale; 
+
+        // Speed States: [Label, TotalTimeInMs]
+        const speeds = [
+            ["STANDARD (1.5s)", 1500],
+            ["SLOW I (2.0s)", 2000],
+            ["SLOW II (2.5s)", 2500]
+        ];
+        let currentSpeedIdx = 0;
+
+        let startTime = null; let elapsedSimTime = 0;
+        let ballPos = 0; let reachedHoops = []; let animationId = null; let audioCtx = null;
+        let bellVibrations = new Array(11).fill(0);
+
+        const startX = 50, startY = 80, floorY = 520, ballRadius = 12, trackThickness = 16, trackExtension = 72;
+        const endX = 1150, endY = floorY;
+        const totalTrackLen = Math.sqrt(Math.pow(endX - startX, 2) + Math.pow(endY - startY, 2));
+        const angle = Math.atan2(endY - startY, endX - startX);
+
+        function getAccel() {
+            // a = 2d / t^2
+            const t = speeds[currentSpeedIdx][1];
+            return (2 * maxDist) / Math.pow(t, 2);
+        }
+
+        function drawBell(ctx, x, y, width, height, isActive, vibrationAmp) {
+            ctx.save();
+            const vibeOffset = isActive ? Math.sin(elapsedSimTime * 0.15) * vibrationAmp : 0;
+            ctx.translate(x + vibeOffset, y); 
+            ctx.beginPath(); ctx.moveTo(0, -25); ctx.lineTo(0, 0); ctx.strokeStyle = "#3e2723"; ctx.stroke();
+            let bellGradient = ctx.createLinearGradient(-width/2, 0, width/2, 0);
+            if (isActive) {
+                bellGradient.addColorStop(0, '#d4af37'); bellGradient.addColorStop(0.5, '#fffde0'); bellGradient.addColorStop(1, '#a67c00');
+            } else {
+                bellGradient.addColorStop(0, '#a0a0a0'); bellGradient.addColorStop(0.5, '#ffffff'); bellGradient.addColorStop(1, '#707070');
+            }
+            ctx.fillStyle = bellGradient; ctx.beginPath(); ctx.arc(0, 0, width / 4, Math.PI, 0); 
+            ctx.quadraticCurveTo(width / 3, height / 3, width / 2, height);
+            ctx.quadraticCurveTo(0, height + height / 6, -width / 2, height);
+            ctx.quadraticCurveTo(-width / 3, height / 3, -width / 4, 0);
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+            ctx.fillStyle = isActive ? '#c0392b' : '#333'; 
+            ctx.beginPath(); ctx.arc(vibeOffset * 1.5, height + width / 10, width / 8, 0, Math.PI * 2); ctx.fill();
+            ctx.restore(); 
+        }
+
+        function playBellChime() {
+            if (!audioCtx) return;
+            const now = audioCtx.currentTime;
+            const oscMain = audioCtx.createOscillator(); const gainMain = audioCtx.createGain();
+            oscMain.type = 'triangle'; oscMain.frequency.setValueAtTime(1568, now); 
+            const oscStrike = audioCtx.createOscillator(); const gainStrike = audioCtx.createGain();
+            oscStrike.type = 'sine'; oscStrike.frequency.setValueAtTime(3136, now); 
+            gainMain.gain.setValueAtTime(0, now); gainMain.gain.linearRampToValueAtTime(0.5, now + 0.01);
+            gainMain.gain.exponentialRampToValueAtTime(0.001, now + 1.2);
+            gainStrike.gain.setValueAtTime(0.3, now); gainStrike.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+            oscMain.connect(gainMain); gainMain.connect(audioCtx.destination);
+            oscStrike.connect(gainStrike); gainStrike.connect(audioCtx.destination);
+            oscMain.start(); oscStrike.start(); oscMain.stop(now + 1.2); oscStrike.stop(now + 0.1);
+        }
+
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = "#d7ccc8"; ctx.fillRect(0, floorY, 1200, 80);
+            ctx.strokeStyle = "#5d4037"; ctx.lineWidth = 3; ctx.strokeRect(-10, floorY, 1220, 5);
+            ctx.fillStyle = "#5d4037"; ctx.strokeStyle = "#3e2723"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(startX, startY); ctx.lineTo(endX, endY);           
+            ctx.lineTo(endX, floorY); ctx.lineTo(startX, floorY);       
+            ctx.closePath(); ctx.fill(); ctx.stroke();
+
+            const textX = (startX + endX) / 2 - 652; const textY = (startY + floorY) / 2 + 70;
+            let goldGradient = ctx.createLinearGradient(textX, 0, textX + 600, 0);
+            goldGradient.addColorStop(0, '#d4af37'); goldGradient.addColorStop(0.5, '#fffde0'); goldGradient.addColorStop(1, '#a67c00');   
+            ctx.fillStyle = goldGradient; ctx.font = "italic bold 72px 'Times New Roman', serif";
+            ctx.fillText("DE MOTU LOCALI", textX, textY);
+
+            ctx.save(); ctx.translate(startX, startY); ctx.rotate(angle);
+            ctx.fillStyle = '#8e6e46'; ctx.fillRect(0, 0, totalTrackLen, trackThickness);
+            ctx.strokeRect(0, 0, totalTrackLen, trackThickness);
+            ctx.fillStyle = "#a1887f"; ctx.fillRect(0, -60, totalTrackLen, 60);
+            ctx.fillStyle = "#4e342e"; ctx.fillRect(0, -60, totalTrackLen, 10);
+            ctx.fillStyle = "#c0392b"; ctx.fillRect(trackExtension - 2, 0, 4, trackThickness);
+            const bellWidth = 13.44, bellHeight = 16.8; 
+            hoops.forEach((h, index) => {
+                const x = trackExtension + (h * scale);
+                ctx.fillStyle = "#3e2723"; ctx.fillRect(x - 20, -60, 4, 60); 
+                const isActive = reachedHoops.includes(h);
+                drawBell(ctx, x - 18, -40, bellWidth, bellHeight, isActive, bellVibrations[index]);
+                ctx.fillStyle = "#3e2723"; ctx.font = "bold 14px 'Segoe UI'";
+                let distMeters = (h * 0.25).toFixed(3) + "m";
+                ctx.fillText(distMeters, x - 32, -75);
+            });
+            ctx.save(); ctx.translate(trackExtension + ballPos, -ballRadius);
+            ctx.rotate(ballPos / ballRadius);
+            ctx.beginPath(); ctx.arc(0, 0, ballRadius, 0, Math.PI * 2); ctx.fillStyle = '#7f8c8d'; 
+            ctx.fill(); ctx.strokeStyle = '#2c3e50'; ctx.stroke();
+            ctx.restore(); ctx.restore();
+        }
+
+        function update(timestamp) {
+            if (!startTime) startTime = timestamp;
+            elapsedSimTime = timestamp - startTime;
+            
+            const currentAccel = getAccel();
+            ballPos = 0.5 * currentAccel * Math.pow(elapsedSimTime, 2);
+            
+            hoops.forEach((h, index) => {
+                if (ballPos >= h * scale && !reachedHoops.includes(h)) {
+                    reachedHoops.push(h); playBellChime(); bellVibrations[index] = 6;
+                }
+            });
+            bellVibrations = bellVibrations.map(v => v * 0.95); draw();
+            if (ballPos < maxDist) { animationId = requestAnimationFrame(update); }
+            else { statusDiv.innerText = "Experiment Concluded"; }
+        }
+
+        startBtn.onclick = function() {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            statusDiv.innerText = "Status: ACTIVE 🔊";
+            cancelAnimationFrame(animationId); startTime = null; elapsedSimTime = 0; ballPos = 0; reachedHoops = []; bellVibrations.fill(0); 
+            requestAnimationFrame(update);
+        };
+
+        speedBtn.onclick = function() {
+            currentSpeedIdx = (currentSpeedIdx + 1) % speeds.length;
+            this.innerText = "SPEED: " + speeds[currentSpeedIdx][0];
+            const timeSeconds = (speeds[currentSpeedIdx][1] / 1000).toFixed(1);
+            formulaDiv.innerText = `Total Duration: ${timeSeconds} s | x = ½at²`;
+            statusDiv.innerText = `Apparatus Ready - Mode: ${speeds[currentSpeedIdx][0]}`;
+        };
+        draw(); 
+    </script>
+</body>
+</html>
